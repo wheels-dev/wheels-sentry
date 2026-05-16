@@ -4,20 +4,20 @@ A Wheels plugin for [Sentry](https://sentry.io) error tracking. Provides automat
 
 ## Requirements
 
-- Wheels 3.0+
+- Wheels 4.0+
 - Lucee 5+ or Adobe ColdFusion 2018+
 
 ## Installation
 
-Copy the `sentry` directory into your `plugins/` folder. The plugin auto-initializes on application start.
-
-### Wheels settings to prevent plugin directory cleanup
-
-```cfml
-// config/settings.cfm
-set(overwritePlugins=false);
-set(deletePluginDirectories=false);
+```bash
+wheels packages add wheels-sentry
 ```
+
+This installs the package into `vendor/wheels-sentry/`. At boot, the framework's package loader reads `package.json` and registers a `/plugins/sentry` CFML mapping pointing at the install directory, so the auto-init mixin can construct `new plugins.sentry.SentryClient(...)` without any additional configuration. The mixin attaches to all controllers on application start.
+
+### Upgrading from the legacy plugin layout
+
+If you previously hand-installed this into `plugins/sentry/`, remove that directory after running `wheels packages add wheels-sentry`. The `set(overwritePlugins=false)` / `set(deletePluginDirectories=false)` knobs in `config/settings.cfm` are no longer required — they only mattered for the deprecated `plugins/` install path.
 
 ## Configuration
 
