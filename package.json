@@ -1,9 +1,12 @@
 {
     "name": "wheels-sentry",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "author": "PAI Industries",
     "description": "Sentry error tracking for Wheels with framework-aware context enrichment",
     "wheelsVersion": ">=4.0",
+    "mappings": {
+        "plugins.sentry": "."
+    },
     "provides": {
         "mixins": "controller",
         "services": [],
