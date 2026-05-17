@@ -27,7 +27,7 @@ component mixin="controller" output="false" {
 		if (structKeyExists(application, "sentry"))
 			return;
 
-		lock name="sentryForWheelsInit" type="exclusive" timeout="10" {
+		lock name="wheelsSentryInit" type="exclusive" timeout="10" {
 
 		if (structKeyExists(application, "sentry"))
 			return;
