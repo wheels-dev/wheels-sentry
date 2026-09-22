@@ -13,7 +13,9 @@ A Wheels plugin for [Sentry](https://sentry.io) error tracking. Provides automat
 wheels packages add wheels-sentry
 ```
 
-This installs the package into `vendor/wheels-sentry/`. At boot, the framework's package loader reads `package.json` and registers a `/plugins/sentry` CFML mapping pointing at the install directory, so the auto-init mixin can construct `new plugins.sentry.SentryClient(...)` without any additional configuration. The mixin attaches to all controllers on application start.
+This installs the package into `vendor/wheels-sentry/`. At boot the framework's package loader reads `package.json` and builds the client; the mixin attaches to all controllers on application start, so no application code is required.
+
+The loader is *asked* to register a `/plugins/sentry` mapping, and this package declares it — but on Lucee a mapping registered after application start does not resolve (the entry is written to `application.mappings` and never consulted, wheels-dev/wheels#3639). The client is therefore constructed through the declared alias when the engine honours it, and otherwise through the install path `wheels packages add` guarantees, and the boot log records which was used.
 
 ### Upgrading from the legacy plugin layout
 
