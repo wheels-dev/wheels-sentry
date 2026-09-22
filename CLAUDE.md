@@ -4,15 +4,15 @@
 
 A Wheels framework package for [Sentry](https://sentry.io) error tracking. Provides automatic SDK initialization, controller mixin methods for exception capture/messaging/breadcrumbs, configurable scope capture, and PII controls.
 
-This package is part of the Wheels first-party package collection, hosted in the main Wheels repository under `packages/sentry/`. Activate by copying to `vendor/sentry/`.
+This package is part of the Wheels first-party package collection, hosted in the main Wheels repository under `packages/sentry/`. Install with `wheels packages add wheels-sentry` (into `vendor/wheels-sentry/`).
 
 ## Package Architecture
 
 Standard Wheels package with two CFCs:
 - `Sentry.cfc` — main package CFC with controller mixin methods (`sentryCapture`, `sentryMessage`, `sentrySetUser`, `sentryAddBreadcrumb`)
-- `SentryClient.cfc` — HTTP transport layer that sends events to the Sentry API
+- `lib/SentryClient.cfc` — HTTP transport layer that sends events to the Sentry API (kept OUT of the package root: the loader resolves a package's entry point from the root CFCs, and two of them made that choice filesystem-dependent — wheels-dev/wheels#3639)
 
-PackageLoader discovers this via `package.json` and injects public methods from `Sentry.cfc` into controllers.
+PackageLoader discovers this via `package.json` (`"main": "Sentry"`) and injects public methods from `Sentry.cfc` into controllers.
 
 ## File Structure
 
@@ -20,7 +20,7 @@ PackageLoader discovers this via `package.json` and injects public methods from 
 packages/sentry/
 ├── CLAUDE.md              # This file
 ├── Sentry.cfc             # Main package CFC — controller mixins
-├── SentryClient.cfc       # HTTP client for Sentry API
+├── lib/SentryClient.cfc   # HTTP client for Sentry API
 ├── package.json           # Package manifest (mixins: controller)
 ├── index.cfm              # Package info page (Wheels debug panel)
 ├── box.json               # CommandBox package metadata

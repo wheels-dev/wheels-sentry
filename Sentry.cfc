@@ -34,11 +34,16 @@ component mixin="controller" output="false" {
 
 		try {
 			var dsn = "";
-			try {
-				dsn = get("sentryDSN");
-			} catch (any e) {}
+			// `get()` is deliberately NOT used here. A package CFC does not inherit
+			// wheels.Global ("Children inherit them; there is no per-instance mixin
+			// copy" — vendor/wheels/global/settings.cfm), so `get("sentryDSN")`
+			// throws "No matching function [GET] found" straight into the catch
+			// below and EVERY setting silently took its default. That is why the
+			// documented `set(sentryDSN="...")` appeared to be ignored, and why the
+			// package could log a clean load while never emitting an event.
+			dsn = Trim(ToString($sentrySetting("sentryDSN", "")));
 
-			if (!len(trim(dsn))) {
+			if (!len(dsn)) {
 				var javaEnv = createObject("java", "java.lang.System").getenv("SENTRY_DSN");
 				if (!isNull(javaEnv) && len(trim(javaEnv)))
 					dsn = javaEnv;
@@ -62,9 +67,9 @@ component mixin="controller" output="false" {
 
 			// Read scope settings with defaults
 			var scopeSettings = {
-				"sendDefaultPii":       $sentryGetSetting("sentrySendDefaultPii", false),
-				"includeHeaders":       $sentryGetSetting("sentryIncludeHeaders", true),
-				"includeServerContext":  $sentryGetSetting("sentryIncludeServerContext", true),
+				"sendDefaultPii":       $sentrySetting("sentrySendDefaultPii", false),
+				"includeHeaders":       $sentrySetting("sentryIncludeHeaders", true),
+				"includeServerContext":  $sentrySetting("sentryIncludeServerContext", true),
 				"includeUser":          false,
 				"includeSession":       false,
 				"includeCookies":       false
@@ -72,28 +77,28 @@ component mixin="controller" output="false" {
 
 			// PII settings: individual overrides take precedence, otherwise follow sendDefaultPii
 			var pii = scopeSettings.sendDefaultPii;
-			scopeSettings.includeUser    = $sentryGetSetting("sentryIncludeUser", pii);
-			scopeSettings.includeSession = $sentryGetSetting("sentryIncludeSession", pii);
-			scopeSettings.includeCookies = $sentryGetSetting("sentryIncludeCookies", pii);
+			scopeSettings.includeUser    = $sentrySetting("sentryIncludeUser", pii);
+			scopeSettings.includeSession = $sentrySetting("sentryIncludeSession", pii);
+			scopeSettings.includeCookies = $sentrySetting("sentryIncludeCookies", pii);
 
-			application.sentry = new plugins.sentry.SentryClient(
-				DSN: dsn,
-				environment: env,
-				release: rel,
-				serverName: cgi.server_name,
-				scopeSettings: scopeSettings
+			var built = $buildClient(
+				dsn = dsn,
+				environment = env,
+				release = rel,
+				scopeSettings = scopeSettings
 			);
+			application.sentry = built.client;
 
 			writeLog(
-				text="wheels-sentry initialized (env=#env#, release=#rel#, pii=#pii#)",
+				text="wheels-sentry initialized (env=#env#, release=#rel#, pii=#pii#, client=#built.via#)",
 				type="information",
-				file="application"
+				file="wheels-sentry"
 			);
 		} catch (any e) {
 			writeLog(
 				text="wheels-sentry initialization failed: #e.message#",
 				type="error",
-				file="application"
+				file="wheels-sentry"
 			);
 		}
 
@@ -101,16 +106,95 @@ component mixin="controller" output="false" {
 	}
 
 	/**
-	 * Read a Wheels setting with a fallback default. Returns the default
-	 * if the setting doesn't exist or throws.
+	 * Read a Wheels setting, with a fallback default.
+	 *
+	 * `get()` CANNOT be used here. A package CFC does not inherit wheels.Global
+	 * ("Children inherit them; there is no per-instance mixin copy" —
+	 * vendor/wheels/global/settings.cfm), so the framework helper is undefined
+	 * inside this component. The previous implementation called it anyway, the
+	 * throw was swallowed by the catch, and EVERY setting returned its default:
+	 * `set(sentryDSN="...")` looked ignored and the package loaded cleanly
+	 * without ever creating a client. This reads the same struct get() reads.
+	 *
+	 * PUBLIC so a spec can prove configured settings reach the package — this is
+	 * the seam that was broken.
 	 */
-	private any function $sentryGetSetting(required string name, required any defaultValue) {
-		try {
-			var val = get(arguments.name);
-			if (isBoolean(val)) return val;
-			if (isSimpleValue(val) && len(val)) return val;
-		} catch (any e) {}
+	public any function $sentrySetting(required string name, required any defaultValue) {
+		// BOTH keys, in order. The framework builds settings in application.$wheels
+		// (vendor/wheels/events/onapplicationstart.cfc:34) and mirrors them to
+		// application.wheels only at the very end of application start (:450) —
+		// while packages load in between (:426), so which struct holds the value
+		// depends on WHEN this is called. Measured 2026-09-21: at package load
+		// application.wheels existed but was EMPTY of settings, and reading only
+		// that key returned the default for every setting (dsnLen=0 at boot,
+		// 95 once the app was serving).
+		for (local.appKey in ["$wheels", "wheels"]) {
+			try {
+				if (
+					structKeyExists(application, local.appKey)
+					&& structKeyExists(application[local.appKey], arguments.name)
+				) {
+					local.value = application[local.appKey][arguments.name];
+					if (isBoolean(local.value)) {
+						return local.value;
+					}
+					if (isSimpleValue(local.value) && len(trim(local.value))) {
+						return local.value;
+					}
+				}
+			} catch (any e) {
+				// an unreadable settings scope must still yield the documented default
+			}
+		}
 		return arguments.defaultValue;
+	}
+
+	/**
+	 * Build the transport client and report WHICH component path resolved.
+	 *
+	 * WHY TWO RUNGS. The package declares `mappings: {"plugins.sentry": "."}`,
+	 * and that alias is tried first: it works when the application also declares
+	 * it in this.mappings, and on engines that honour a mapping registered at
+	 * runtime. Lucee 7 does not — the loader writes the entry into
+	 * application.mappings and the engine never consults it (wheels-dev/wheels
+	 * #3639) — so the second rung uses the install path `wheels packages add`
+	 * guarantees. Without this the package compiled a `new plugins.sentry.*`
+	 * reference that only resolved for hand-installed copies, and the failure
+	 * vanished into the initSentry() catch.
+	 *
+	 * `via` is logged so a "no events" report can be diagnosed from the log
+	 * alone. PUBLIC so a spec can assert both rungs exist and the fallback works.
+	 */
+	public struct function $buildClient(
+		required string dsn,
+		required string environment,
+		required string release,
+		required struct scopeSettings
+	) {
+		local.args = {
+			DSN: arguments.dsn,
+			environment: arguments.environment,
+			release: arguments.release,
+			serverName: cgi.server_name,
+			scopeSettings: arguments.scopeSettings
+		};
+
+		try {
+			return {
+				client: new plugins.sentry.lib.SentryClient(argumentCollection = local.args),
+				via: "plugins.sentry.lib.SentryClient"
+			};
+		} catch (any mappingMiss) {
+			// CreateObject takes the path as a STRING, so the hyphenated install
+			// directory is fine here — a `new vendor.wheels-sentry.…` EXPRESSION is
+			// a parse error ("Closing [}] not found"), which is exactly the kind of
+			// failure this second rung exists to avoid.
+			local.client = CreateObject("component", "vendor.wheels-sentry.lib.SentryClient");
+			return {
+				client: local.client.init(argumentCollection = local.args),
+				via: "vendor.wheels-sentry.lib.SentryClient"
+			};
+		}
 	}
 
 	/**
